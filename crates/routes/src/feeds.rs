@@ -2,14 +2,12 @@ use actix_web::{Error, HttpRequest, HttpResponse, Result, error::ErrorBadRequest
 use chrono::{DateTime, Utc};
 use lemmy_api_utils::{
   context::LemmyContext,
-  utils::{check_private_instance, local_user_view_from_jwt},
+  utils::{check_private_instance, local_user_view_from_jwt, read_auth_token},
 };
 use lemmy_db_schema::{
   PersonContentType,
   source::{
-    community::Community,
-    multi_community::MultiCommunity,
-    notification::Notification,
+    community::Community, multi_community::MultiCommunity, notification::Notification,
     person::Person,
   },
   traits::ApubActor,
@@ -20,18 +18,13 @@ use lemmy_db_views_notification::{NotificationData, NotificationView, impls::Not
 use lemmy_db_views_person_content_combined::impls::PersonContentCombinedQuery;
 use lemmy_db_views_post::{PostView, impls::PostQuery};
 use lemmy_db_views_site::SiteView;
+use lemmy_email::{translations::Lang, user_language};
 use lemmy_utils::{
-  cache_header::cache_1hour,
-  error::LemmyResult,
-  settings::structs::Settings,
+  cache_header::cache_1hour, error::LemmyResult, settings::structs::Settings,
   utils::markdown::markdown_to_html,
 };
 use rss::{
-  Category,
-  Channel,
-  EnclosureBuilder,
-  Guid,
-  Item,
+  Category, Channel, EnclosureBuilder, Guid, Item,
   extension::{ExtensionBuilder, ExtensionMap, dublincore::DublinCoreExtension},
 };
 use serde::Deserialize;
@@ -92,28 +85,51 @@ static RSS_NAMESPACE: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
   h
 });
 
+// Configure AI helper to write and critique functions
+async fn get_lang_or_default(
+  req: &HttpRequest,
+  context: &web::Data<LemmyContext>,
+) -> Result<Lang, Error> {
+  let jwt = read_auth_token(&req)?;
+  let mut lang = Lang::En;
+
+  if let Some(jwt) = jwt {
+    let local_user_view = local_user_view_from_jwt(&jwt, &context).await?;
+    lang = user_language(&local_user_view.local_user);
+  }
+  Ok(lang)
+}
+
 async fn get_all_feed(
+  req: HttpRequest,
   web::Query(info): web::Query<Params>,
   context: web::Data<LemmyContext>,
 ) -> Result<HttpResponse, Error> {
+  let lang = get_lang_or_default(&req, &context).await?;
+
   get_feed_data(
     &context,
     ListingType::All,
     info.sort_type(),
     info.get_limit(),
+    lang,
   )
   .await
 }
 
 async fn get_local_feed(
+  req: HttpRequest,
   web::Query(info): web::Query<Params>,
   context: web::Data<LemmyContext>,
 ) -> Result<HttpResponse, Error> {
+  let lang = get_lang_or_default(&req, &context).await;
+
   get_feed_data(
     &context,
     ListingType::Local,
     info.sort_type(),
     info.get_limit(),
+    lang?,
   )
   .await
 }
@@ -123,6 +139,7 @@ async fn get_feed_data(
   listing_type: ListingType,
   sort_type: PostSortType,
   limit: i64,
+  lang: Lang,
 ) -> Result<HttpResponse, Error> {
   let site_view = SiteView::read_local(&mut context.pool()).await?;
   check_private_instance(&None, &site_view.local_site)?;
@@ -137,7 +154,15 @@ async fn get_feed_data(
   .await?
   .items;
 
-  let title = format!("{} - {}", site_view.site.name, listing_type);
+  let title = format!(
+    "{} - {}",
+    site_view.site.name,
+    match Some(listing_type) {
+      Some(ListingType::All) => lang.all(),
+      Some(ListingType::Local) => lang.local(),
+      _ => "Illegal",
+    }
+  );
   let link = context.settings().get_protocol_and_hostname();
   let items = create_post_items(posts, context.settings())?;
   Ok(send_feed_response(title, link, None, items, site_view))
@@ -275,6 +300,7 @@ async fn get_feed_front(
   let jwt: String = req.match_info().get("jwt").unwrap_or("none").parse()?;
   let site_view = SiteView::read_local(&mut context.pool()).await?;
   let local_user = local_user_view_from_jwt(&jwt, &context).await?;
+  let lang = user_language(&local_user.local_user);
 
   check_private_instance(&Some(local_user.clone()), &site_view.local_site)?;
 
@@ -289,7 +315,7 @@ async fn get_feed_front(
   .await?
   .items;
 
-  let title = format!("{} - Subscribed", site_view.site.name);
+  let title = format!("{} - {}", site_view.site.name, lang.subscribed());
   let link = context.settings().get_protocol_and_hostname();
   let items = create_post_items(posts, context.settings())?;
   Ok(send_feed_response(title, link, None, items, site_view))
@@ -329,6 +355,7 @@ async fn get_feed_notifs(
   let site_view = SiteView::read_local(&mut context.pool()).await?;
   let local_user = local_user_view_from_jwt(&jwt, &context).await?;
   let show_bot_accounts = Some(local_user.local_user.show_bot_accounts);
+  let lang = user_language(&local_user.local_user);
 
   check_private_instance(&Some(local_user.clone()), &site_view.local_site)?;
 
@@ -341,10 +368,13 @@ async fn get_feed_notifs(
   .items;
 
   let protocol_and_hostname = context.settings().get_protocol_and_hostname();
-
-  let title = format!("{} - Notifications", site_view.site.name);
+  let title = format!(
+    "{} - {}",
+    site_view.site.name,
+    lang.notifications().to_string(),
+  );
   let link = format!("{protocol_and_hostname}/notifications");
-  let items = create_reply_and_mention_items(notifications, &context)?;
+  let items = create_reply_and_mention_items(notifications, &context, lang)?;
   Ok(send_feed_response(title, link, None, items, site_view))
 }
 
@@ -379,6 +409,7 @@ async fn get_feed_modlog(
 fn create_reply_and_mention_items(
   notifs: Vec<NotificationView>,
   context: &LemmyContext,
+  lang: Lang,
 ) -> LemmyResult<Vec<Item>> {
   let reply_items: Vec<Item> = notifs
     .iter()
@@ -393,6 +424,7 @@ fn create_reply_and_mention_items(
             &post.post.body.clone().unwrap_or_default(),
             &v.notification,
             context.settings(),
+            lang,
           ))
         }
         NotificationData::Comment(comment) => {
@@ -404,6 +436,7 @@ fn create_reply_and_mention_items(
             &comment.comment.content,
             &v.notification,
             context.settings(),
+            lang,
           ))
         }
         NotificationData::PrivateMessage(pm) => {
@@ -418,6 +451,7 @@ fn create_reply_and_mention_items(
             &pm.private_message.content,
             &v.notification,
             context.settings(),
+            lang,
           ))
         }
         // skip modlog items
@@ -686,6 +720,7 @@ fn build_item(
   content: &str,
   notification: &Notification,
   settings: &Settings,
+  lang: Lang,
 ) -> LemmyResult<Item> {
   // TODO add images
   let guid = Some(Guid {
@@ -695,11 +730,11 @@ fn build_item(
   let description = Some(markdown_to_html(content));
 
   let title = match notification.kind {
-    NotificationType::Mention => format!("Mention from {}", creator.name),
-    NotificationType::Reply => format!("Reply from {}", creator.name),
-    NotificationType::Subscribed => "Subscribed".to_string(),
-    NotificationType::PrivateMessage => format!("Private message from {}", creator.name),
-    NotificationType::ModAction => "Mod action".to_string(),
+    NotificationType::Mention => lang.mention_from_x(creator.name.clone()),
+    NotificationType::Reply => lang.reply_from_x(creator.name.clone()),
+    NotificationType::Subscribed => lang.subscribed().to_string(),
+    NotificationType::PrivateMessage => lang.private_message_from_x(creator.name.clone()),
+    NotificationType::ModAction => lang.mod_action().to_string(),
   };
   Ok(Item {
     title: Some(title),

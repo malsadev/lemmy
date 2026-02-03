@@ -4298,6 +4298,7 @@ dependencies = [
  "lemmy_db_views_post",
  "lemmy_db_views_site",
  "lemmy_diesel_utils",
+ "lemmy_email",
  "lemmy_utils 1.0.0-alpha.12",
  "percent-encoding",
  "pretty_assertions",
