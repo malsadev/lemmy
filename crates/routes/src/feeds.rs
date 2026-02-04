@@ -85,7 +85,6 @@ static RSS_NAMESPACE: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
   h
 });
 
-// Configure AI helper to write and critique functions
 async fn get_lang_or_default(
   req: &HttpRequest,
   context: &web::Data<LemmyContext>,
@@ -368,11 +367,7 @@ async fn get_feed_notifs(
   .items;
 
   let protocol_and_hostname = context.settings().get_protocol_and_hostname();
-  let title = format!(
-    "{} - {}",
-    site_view.site.name,
-    lang.notifications().to_string(),
-  );
+  let title = format!("{} - {}", site_view.site.name, lang.notifications(),);
   let link = format!("{protocol_and_hostname}/notifications");
   let items = create_reply_and_mention_items(notifications, &context, lang)?;
   Ok(send_feed_response(title, link, None, items, site_view))
@@ -387,6 +382,7 @@ async fn get_feed_modlog(
   let jwt: String = req.match_info().get("jwt").unwrap_or("none").parse()?;
   let site_view = SiteView::read_local(&mut context.pool()).await?;
   let local_user = local_user_view_from_jwt(&jwt, &context).await?;
+  let lang = user_language(&local_user.local_user);
   check_private_instance(&Some(local_user.clone()), &site_view.local_site)?;
 
   let modlog = ModlogQuery {
@@ -400,9 +396,9 @@ async fn get_feed_modlog(
   .items;
 
   let protocol_and_hostname = context.settings().get_protocol_and_hostname();
-  let title = format!("{} - Modlog", local_user.person.name);
+  let title = format!("{} - {}", local_user.person.name, lang.modlog());
   let link = format!("{protocol_and_hostname}/modlog");
-  let items = create_modlog_items(modlog, context.settings())?;
+  let items = create_modlog_items(modlog, context.settings(), lang)?;
   Ok(send_feed_response(title, link, None, items, site_view))
 }
 
@@ -463,7 +459,11 @@ fn create_reply_and_mention_items(
   Ok(reply_items)
 }
 
-fn create_modlog_items(modlog: Vec<ModlogView>, settings: &Settings) -> LemmyResult<Vec<Item>> {
+fn create_modlog_items(
+  modlog: Vec<ModlogView>,
+  settings: &Settings,
+  lang: Lang,
+) -> LemmyResult<Vec<Item>> {
   // All of these go to your modlog url
   let modlog_url = format!(
     "{}/modlog?listing_type=ModeratorView",
@@ -483,184 +483,155 @@ fn create_modlog_items(modlog: Vec<ModlogView>, settings: &Settings) -> LemmyRes
         ModlogKind::AdminAllowInstance => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "Admin {} instance - {}",
-            if r.modlog.is_revert {
-              "disallowed"
-            } else {
-              "allowed"
-            },
-            &target_instance_domain
-          ),
+          if r.modlog.is_revert {
+            lang.admin_disallowed_instance_x(&target_instance_domain)
+          } else {
+            lang.admin_allowed_instance_x(&target_instance_domain)
+          },
           settings,
         ),
         ModlogKind::AdminBlockInstance => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "Admin {} instance - {}",
-            if r.modlog.is_revert {
-              "unblocked"
-            } else {
-              "blocked"
-            },
-            &target_instance_domain
-          ),
+          if r.modlog.is_revert {
+            lang.admin_unblocked_instance_x(&target_instance_domain)
+          } else {
+            lang.admin_blocked_instance_x(&target_instance_domain)
+          },
           settings,
         ),
         ModlogKind::AdminPurgeComment => {
-          build_modlog_item(r, &modlog_url, "Admin purged comment", settings)
+          build_modlog_item(r, &modlog_url, lang.admin_purged_comment(), settings)
         }
         ModlogKind::AdminPurgeCommunity => {
-          build_modlog_item(r, &modlog_url, "Admin purged community", settings)
+          build_modlog_item(r, &modlog_url, lang.admin_purged_community(), settings)
         }
         ModlogKind::AdminPurgePerson => {
-          build_modlog_item(r, &modlog_url, "Admin purged person", settings)
+          build_modlog_item(r, &modlog_url, lang.admin_purged_person(), settings)
         }
         ModlogKind::AdminPurgePost => {
-          build_modlog_item(r, &modlog_url, "Admin purged post", settings)
+          build_modlog_item(r, &modlog_url, lang.admin_purged_post(), settings)
         }
         ModlogKind::AdminAdd => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} admin {}",
-            removed_added_str(r.modlog.is_revert),
-            &target_person_name
-          ),
+          if r.modlog.is_revert {
+            lang.added_admin_x(&target_person_name)
+          } else {
+            lang.removed_admin_x(&target_person_name)
+          },
           settings,
         ),
         ModlogKind::ModAddToCommunity => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} mod {} to /c/{}",
-            removed_added_str(r.modlog.is_revert),
-            &target_person_name,
-            &target_community_name
-          ),
+          if r.modlog.is_revert {
+            lang.added_mod_x_to_community_y(&target_person_name, &target_community_name)
+          } else {
+            lang.removed_mod_x_from_community_y(&target_person_name, &target_community_name)
+          },
           settings,
         ),
         ModlogKind::AdminBan => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} {}",
-            banned_unbanned_str(r.modlog.is_revert),
-            &target_person_name
-          ),
+          if r.modlog.is_revert {
+            lang.unbanned_user_x(&target_person_name)
+          } else {
+            lang.banned_user_x(&target_person_name)
+          },
           settings,
         ),
         ModlogKind::ModBanFromCommunity => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} {} from /c/{}",
-            banned_unbanned_str(r.modlog.is_revert),
-            &target_person_name,
-            &target_community_name
-          ),
+          if r.modlog.is_revert {
+            lang.unbanned_user_x_from_community_y(&target_person_name, &target_community_name)
+          } else {
+            lang.banned_user_x_from_community_y(&target_person_name, &target_community_name)
+          },
           settings,
         ),
         ModlogKind::ModFeaturePostCommunity => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} post {}",
-            if r.modlog.is_revert {
-              "Featured"
-            } else {
-              "Unfeatured"
-            },
-            &target_post_name
-          ),
+          if r.modlog.is_revert {
+            lang.featured_post_x(&target_post_name)
+          } else {
+            lang.unfeatured_post_x(&target_post_name)
+          },
           settings,
         ),
         ModlogKind::AdminFeaturePostSite => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} post {}",
-            if r.modlog.is_revert {
-              "Featured"
-            } else {
-              "Unfeatured"
-            },
-            &target_post_name
-          ),
+          if r.modlog.is_revert {
+            lang.featured_post_x(&target_post_name)
+          } else {
+            lang.unfeatured_post_x(&target_post_name)
+          },
           settings,
         ),
         ModlogKind::ModChangeCommunityVisibility => build_modlog_item(
           r,
           &modlog_url,
-          format!("Changed /c/{} visibility", &&target_community_name),
+          lang.changed_community_x_visibility(&target_community_name),
           settings,
         ),
         ModlogKind::ModLockPost => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} post {}",
-            if r.modlog.is_revert {
-              "Unlocked"
-            } else {
-              "Locked"
-            },
-            &&target_post_name
-          ),
+          if r.modlog.is_revert {
+            lang.unlocked_post_x(&target_post_name)
+          } else {
+            lang.locked_post_x(&target_post_name)
+          },
           settings,
         ),
         ModlogKind::ModRemoveComment => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} comment {}",
-            removed_restored_str(r.modlog.is_revert),
-            &&target_comment_content
-          ),
+          if r.modlog.is_revert {
+            lang.restored_comment_x(&target_comment_content)
+          } else {
+            lang.removed_comment_x(&target_comment_content)
+          },
           settings,
         ),
         ModlogKind::AdminRemoveCommunity => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} community /c/{}",
-            removed_restored_str(r.modlog.is_revert),
-            &&target_community_name
-          ),
+          if r.modlog.is_revert {
+            lang.restored_community_x(&target_community_name)
+          } else {
+            lang.removed_community_x(&target_community_name)
+          },
           settings,
         ),
         ModlogKind::ModRemovePost => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} post {}",
-            removed_restored_str(r.modlog.is_revert),
-            &target_post_name
-          ),
+          if r.modlog.is_revert {
+            lang.restored_post_x(&target_post_name)
+          } else {
+            lang.removed_post_x(&target_post_name)
+          },
           settings,
         ),
         ModlogKind::ModTransferCommunity => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "Tranferred /c/{} to /u/{}",
-            &&target_community_name, &&target_person_name
-          ),
+          lang.transferred_community_x_to_user_y(&target_community_name, &target_person_name),
           settings,
         ),
         ModlogKind::ModLockComment => build_modlog_item(
           r,
           &modlog_url,
-          format!(
-            "{} comment {}",
-            if r.modlog.is_revert {
-              "Unlocked"
-            } else {
-              "Locked"
-            },
-            &&target_comment_content
-          ),
+          if r.modlog.is_revert {
+            lang.unlocked_comment_x(&target_comment_content)
+          } else {
+            lang.locked_comment_x(&target_comment_content)
+          },
           settings,
         ),
       }
@@ -668,18 +639,6 @@ fn create_modlog_items(modlog: Vec<ModlogView>, settings: &Settings) -> LemmyRes
     .collect::<LemmyResult<Vec<Item>>>()?;
 
   Ok(modlog_items)
-}
-
-fn removed_added_str(is_revert: bool) -> &'static str {
-  if is_revert { "Added" } else { "Removed" }
-}
-
-fn banned_unbanned_str(is_revert: bool) -> &'static str {
-  if is_revert { "Unbanned" } else { "Banned" }
-}
-
-fn removed_restored_str(is_revert: bool) -> &'static str {
-  if is_revert { "Restored" } else { "Removed" }
 }
 
 fn build_modlog_item<T: Into<String>>(
