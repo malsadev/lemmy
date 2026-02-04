@@ -285,7 +285,7 @@ async fn get_feed_multi_community(
   Ok(send_feed_response(
     title,
     link,
-    multi_community.description,
+    multi_community.summary,
     items,
     site_view,
   ))
