@@ -534,9 +534,9 @@ fn create_modlog_items(
           r,
           &modlog_url,
           if r.modlog.is_revert {
-            lang.added_mod_x_to_community_y(&target_person_name, &target_community_name)
+            lang.added_mod_x_to_community_y(&target_community_name, &target_person_name)
           } else {
-            lang.removed_mod_x_from_community_y(&target_person_name, &target_community_name)
+            lang.removed_mod_x_from_community_y(&target_community_name, &target_person_name)
           },
           settings,
         ),
@@ -554,9 +554,9 @@ fn create_modlog_items(
           r,
           &modlog_url,
           if r.modlog.is_revert {
-            lang.unbanned_user_x_from_community_y(&target_person_name, &target_community_name)
+            lang.unbanned_user_x_from_community_y(&target_community_name, &target_person_name)
           } else {
-            lang.banned_user_x_from_community_y(&target_person_name, &target_community_name)
+            lang.banned_user_x_from_community_y(&target_community_name, &target_person_name)
           },
           settings,
         ),
