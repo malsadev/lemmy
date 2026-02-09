@@ -1,4 +1,12 @@
-use actix_web::{Error, HttpRequest, HttpResponse, Result, error::ErrorBadRequest, web};
+use actix_web::{
+  Error,
+  HttpRequest,
+  HttpResponse,
+  Result,
+  error::ErrorBadRequest,
+  http::header::*,
+  web,
+};
 use chrono::{DateTime, Utc};
 use lemmy_api_utils::{
   context::LemmyContext,
@@ -27,6 +35,7 @@ use lemmy_utils::{
   settings::structs::Settings,
   utils::markdown::markdown_to_html,
 };
+use rosetta_i18n::{Language, LanguageId};
 use rss::{
   Category,
   Channel,
@@ -93,18 +102,120 @@ static RSS_NAMESPACE: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
   h
 });
 
-async fn get_lang_or_default(
+async fn get_lang_or_negotiate(
   req: &HttpRequest,
   context: &web::Data<LemmyContext>,
 ) -> Result<Lang, Error> {
   let jwt = read_auth_token(&req)?;
-  let mut lang = Lang::En;
+  let lang;
 
   if let Some(jwt) = jwt {
     let local_user_view = local_user_view_from_jwt(&jwt, &context).await?;
     lang = user_language(&local_user_view.local_user);
+  } else if req.headers().contains_key(ACCEPT_LANGUAGE) {
+    lang = negotiate_lang(req).unwrap_or(Lang::En);
+  } else {
+    lang = Lang::En;
   }
   Ok(lang)
+}
+
+fn negotiate_lang(req: &HttpRequest) -> Option<Lang> {
+  let client_langs = match req.headers().get(ACCEPT_LANGUAGE) {
+    Some(v) => AcceptLanguage(
+      v.to_str()
+        .unwrap()
+        .split(',')
+        .filter_map(|hv| hv.parse().ok())
+        .collect(),
+    ),
+    None => return None,
+  };
+
+  for client_lang in client_langs.ranked() {
+    let lang_id = match client_lang.item() {
+      Some(lang) => LanguageId::new(lang.primary_language()),
+      None => return Some(Lang::En),
+    };
+    match Lang::from_language_id(&lang_id) {
+      Some(lang) => return Some(lang),
+      None => continue,
+    };
+  }
+  None
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use actix_web::test::TestRequest;
+
+  #[test]
+  fn test_negotiate_language_lang_supported_by_server() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "da".parse().unwrap(),
+        "en-GB;q=0.8".parse().unwrap(),
+        "en;q=0.7".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req).unwrap();
+
+    assert_eq!(resolved_lang, Lang::Da);
+  }
+
+  #[test]
+  fn test_negotiate_language_lang_unsupported_by_server() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "fj".parse().unwrap(),
+        "sm".parse().unwrap(),
+        "lo".parse().unwrap(),
+        "km".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    // This test will fail if and once support for Fijian language is introduced
+    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_header_empty() {
+    let req = TestRequest::default().to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_header_malformed() {
+    let req = TestRequest::default()
+      .insert_header((ACCEPT_LANGUAGE, "gibberish"))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_wildcard() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "*".parse().unwrap(),
+        "fr".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req).unwrap();
+
+    assert_eq!(resolved_lang, Lang::En);
+  }
 }
 
 async fn get_all_feed(
@@ -112,7 +223,7 @@ async fn get_all_feed(
   web::Query(info): web::Query<Params>,
   context: web::Data<LemmyContext>,
 ) -> Result<HttpResponse, Error> {
-  let lang = get_lang_or_default(&req, &context).await?;
+  let lang = get_lang_or_negotiate(&req, &context).await?;
 
   get_feed_data(
     &context,
@@ -129,14 +240,14 @@ async fn get_local_feed(
   web::Query(info): web::Query<Params>,
   context: web::Data<LemmyContext>,
 ) -> Result<HttpResponse, Error> {
-  let lang = get_lang_or_default(&req, &context).await;
+  let lang = get_lang_or_negotiate(&req, &context).await?;
 
   get_feed_data(
     &context,
     ListingType::Local,
     info.sort_type(),
     info.get_limit(),
-    lang?,
+    lang,
   )
   .await
 }
@@ -167,7 +278,7 @@ async fn get_feed_data(
     match Some(listing_type) {
       Some(ListingType::All) => lang.all(),
       Some(ListingType::Local) => lang.local(),
-      _ => "Illegal",
+      _ => unreachable!("Only All or Local are expected to match here"),
     }
   );
   let link = context.settings().get_protocol_and_hostname();

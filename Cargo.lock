@@ -4230,6 +4230,7 @@ dependencies = [
  "rand 0.9.2",
  "reqwest 0.13.1",
  "reqwest-middleware",
+ "rosetta-i18n",
  "rss",
  "serde",
  "serial_test",
