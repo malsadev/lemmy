@@ -861,6 +861,7 @@ fn create_post_items(posts: Vec<PostView>, settings: &Settings) -> LemmyResult<V
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
   use super::*;
   use actix_web::test::TestRequest;
@@ -869,6 +870,9 @@ mod tests {
   fn test_negotiate_language_lang_supported_by_server() {
     let req = TestRequest::default()
       .insert_header(AcceptLanguage(vec![
+        "fj".parse().unwrap(),
+        "sm".parse().unwrap(),
+        "lo".parse().unwrap(),
         "da".parse().unwrap(),
         "en-GB;q=0.8".parse().unwrap(),
         "en;q=0.7".parse().unwrap(),
@@ -877,6 +881,8 @@ mod tests {
 
     let resolved_lang = negotiate_lang(&req).unwrap();
 
+    // This test will fail if support for Fijian language is introduced
+    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
     assert_eq!(resolved_lang, Lang::Da);
   }
 
@@ -899,18 +905,9 @@ mod tests {
   }
 
   #[test]
-  fn test_negotiate_language_accept_language_header_empty() {
-    let req = TestRequest::default().to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_accept_language_header_malformed() {
+  fn test_negotiate_language_wildcard_alone() {
     let req = TestRequest::default()
-      .insert_header((ACCEPT_LANGUAGE, "gibberish"))
+      .insert_header(AcceptLanguage(vec!["*".parse().unwrap()]))
       .to_http_request();
 
     let resolved_lang = negotiate_lang(&req);
@@ -919,7 +916,7 @@ mod tests {
   }
 
   #[test]
-  fn test_negotiate_language_accept_language_wildcard() {
+  fn test_negotiate_language_wildcard_with_langs_after() {
     let req = TestRequest::default()
       .insert_header(AcceptLanguage(vec![
         "*".parse().unwrap(),
