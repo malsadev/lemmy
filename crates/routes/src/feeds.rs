@@ -122,17 +122,11 @@ async fn get_lang_or_negotiate(
 fn negotiate_lang(req: &HttpRequest) -> Option<Lang> {
   let client_langs = AcceptLanguage::parse(req).ok()?;
 
-  for client_lang in client_langs.ranked() {
-    match client_lang
-      .item()
+  client_langs.ranked().iter().find_map(|cl| {
+    cl.item()
       .map(|l| LanguageId::new(l.primary_language()))
-      .map(|l| Lang::from_language_id(&l))
-    {
-      Some(l) => return l,
-      None => continue,
-    };
-  }
-  None
+      .and_then(|l| Lang::from_language_id(&l))
+  })
 }
 
 async fn get_all_feed(
