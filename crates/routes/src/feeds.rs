@@ -120,101 +120,19 @@ async fn get_lang_or_negotiate(
 }
 
 fn negotiate_lang(req: &HttpRequest) -> Option<Lang> {
-  let client_langs = match req.headers().get(ACCEPT_LANGUAGE) {
-    Some(v) => AcceptLanguage(
-      v.to_str()
-        .unwrap()
-        .split(',')
-        .filter_map(|hv| hv.parse().ok())
-        .collect(),
-    ),
-    None => return None,
-  };
+  let client_langs = AcceptLanguage::parse(req).ok()?;
 
   for client_lang in client_langs.ranked() {
-    let lang_id = match client_lang.item() {
-      Some(lang) => LanguageId::new(lang.primary_language()),
-      None => return Some(Lang::En),
-    };
-    match Lang::from_language_id(&lang_id) {
-      Some(lang) => return Some(lang),
+    match client_lang
+      .item()
+      .map(|l| LanguageId::new(l.primary_language()))
+      .map(|l| Lang::from_language_id(&l))
+    {
+      Some(l) => return l,
       None => continue,
     };
   }
   None
-}
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-  use actix_web::test::TestRequest;
-
-  #[test]
-  fn test_negotiate_language_lang_supported_by_server() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "da".parse().unwrap(),
-        "en-GB;q=0.8".parse().unwrap(),
-        "en;q=0.7".parse().unwrap(),
-      ]))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req).unwrap();
-
-    assert_eq!(resolved_lang, Lang::Da);
-  }
-
-  #[test]
-  fn test_negotiate_language_lang_unsupported_by_server() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "fj".parse().unwrap(),
-        "sm".parse().unwrap(),
-        "lo".parse().unwrap(),
-        "km".parse().unwrap(),
-      ]))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    // This test will fail if and once support for Fijian language is introduced
-    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_accept_language_header_empty() {
-    let req = TestRequest::default().to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_accept_language_header_malformed() {
-    let req = TestRequest::default()
-      .insert_header((ACCEPT_LANGUAGE, "gibberish"))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_accept_language_wildcard() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "*".parse().unwrap(),
-        "fr".parse().unwrap(),
-      ]))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req).unwrap();
-
-    assert_eq!(resolved_lang, Lang::En);
-  }
 }
 
 async fn get_all_feed(
@@ -940,4 +858,77 @@ fn create_post_items(posts: Vec<PostView>, settings: &Settings) -> LemmyResult<V
   }
 
   Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use actix_web::test::TestRequest;
+
+  #[test]
+  fn test_negotiate_language_lang_supported_by_server() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "da".parse().unwrap(),
+        "en-GB;q=0.8".parse().unwrap(),
+        "en;q=0.7".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req).unwrap();
+
+    assert_eq!(resolved_lang, Lang::Da);
+  }
+
+  #[test]
+  fn test_negotiate_language_lang_unsupported_by_server() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "fj".parse().unwrap(),
+        "sm".parse().unwrap(),
+        "lo".parse().unwrap(),
+        "km".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    // This test will fail if support for Fijian language is introduced
+    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_header_empty() {
+    let req = TestRequest::default().to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_header_malformed() {
+    let req = TestRequest::default()
+      .insert_header((ACCEPT_LANGUAGE, "gibberish"))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    assert!(resolved_lang.is_none());
+  }
+
+  #[test]
+  fn test_negotiate_language_accept_language_wildcard() {
+    let req = TestRequest::default()
+      .insert_header(AcceptLanguage(vec![
+        "*".parse().unwrap(),
+        "fr".parse().unwrap(),
+      ]))
+      .to_http_request();
+
+    let resolved_lang = negotiate_lang(&req);
+
+    assert!(resolved_lang.is_some());
+  }
 }
