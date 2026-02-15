@@ -106,17 +106,16 @@ async fn get_lang_or_negotiate(
   req: &HttpRequest,
   context: &web::Data<LemmyContext>,
 ) -> Result<Lang, Error> {
-  let jwt = read_auth_token(&req)?;
-  let lang;
+  let jwt = read_auth_token(req)?;
 
-  if let Some(jwt) = jwt {
-    let local_user_view = local_user_view_from_jwt(&jwt, &context).await?;
-    lang = user_language(&local_user_view.local_user);
+  let lang = if let Some(jwt) = jwt {
+    let local_user_view = local_user_view_from_jwt(&jwt, context).await?;
+    user_language(&local_user_view.local_user)
   } else if req.headers().contains_key(ACCEPT_LANGUAGE) {
-    lang = negotiate_lang(req).unwrap_or(Lang::En);
+    negotiate_lang(req).unwrap_or(Lang::En)
   } else {
-    lang = Lang::En;
-  }
+    Lang::En
+  };
   Ok(lang)
 }
 
