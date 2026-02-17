@@ -403,7 +403,7 @@ async fn get_feed_notifs(
   .items;
 
   let protocol_and_hostname = context.settings().get_protocol_and_hostname();
-  let title = format!("{} - {}", site_view.site.name, lang.notifications(),);
+  let title = format!("{} - {}", site_view.site.name, lang.notifications());
   let link = format!("{protocol_and_hostname}/notifications");
   let items = create_reply_and_mention_items(notifications, &context, lang)?;
   Ok(send_feed_response(title, link, None, items, site_view))
