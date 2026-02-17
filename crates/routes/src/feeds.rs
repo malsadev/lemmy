@@ -1,16 +1,9 @@
-use actix_web::{
-  Error,
-  HttpRequest,
-  HttpResponse,
-  Result,
-  error::ErrorBadRequest,
-  http::header::*,
-  web,
-};
+use crate::utils::negotiate_content::get_lang_or_negotiate;
+use actix_web::{Error, HttpRequest, HttpResponse, Result, error::ErrorBadRequest, web};
 use chrono::{DateTime, Utc};
 use lemmy_api_utils::{
   context::LemmyContext,
-  utils::{check_private_instance, local_user_view_from_jwt, read_auth_token},
+  utils::{check_private_instance, local_user_view_from_jwt},
 };
 use lemmy_db_schema::{
   PersonContentType,
@@ -35,7 +28,6 @@ use lemmy_utils::{
   settings::structs::Settings,
   utils::markdown::markdown_to_html,
 };
-use rosetta_i18n::{Language, LanguageId};
 use rss::{
   Category,
   Channel,
@@ -101,33 +93,6 @@ static RSS_NAMESPACE: LazyLock<BTreeMap<String, String>> = LazyLock::new(|| {
   );
   h
 });
-
-async fn get_lang_or_negotiate(
-  req: &HttpRequest,
-  context: &web::Data<LemmyContext>,
-) -> Result<Lang, Error> {
-  let jwt = read_auth_token(req)?;
-
-  let lang = if let Some(jwt) = jwt {
-    let local_user_view = local_user_view_from_jwt(&jwt, context).await?;
-    user_language(&local_user_view.local_user)
-  } else if req.headers().contains_key(ACCEPT_LANGUAGE) {
-    negotiate_lang(req).unwrap_or(Lang::En)
-  } else {
-    Lang::En
-  };
-  Ok(lang)
-}
-
-fn negotiate_lang(req: &HttpRequest) -> Option<Lang> {
-  let client_langs = AcceptLanguage::parse(req).ok()?;
-
-  client_langs.ranked().iter().find_map(|cl| {
-    cl.item()
-      .map(|l| LanguageId::new(l.primary_language()))
-      .and_then(|l| Lang::from_language_id(&l))
-  })
-}
 
 async fn get_all_feed(
   req: HttpRequest,
@@ -861,70 +826,4 @@ fn create_post_items(
   }
 
   Ok(items)
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-  use super::*;
-  use actix_web::test::TestRequest;
-
-  fn parse_lang_items(
-    accept_language_header_value: &str,
-  ) -> Vec<QualityItem<Preference<LanguageTag>>> {
-    accept_language_header_value
-      .split(',')
-      .map(|s| s.parse().unwrap())
-      .collect()
-  }
-
-  #[test]
-  fn test_negotiate_language_lang_supported_by_server() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(parse_lang_items(
-        "fj, sm, lo, da, en-GB;q=0.8, en;q=0.7",
-      )))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req).unwrap();
-
-    // This test will fail if support for Fijian language is introduced
-    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
-    assert_eq!(resolved_lang, Lang::Da);
-  }
-
-  #[test]
-  fn test_negotiate_language_lang_unsupported_by_server() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(parse_lang_items("fj, sm, lo, km")))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    // This test will fail if support for Fijian language is introduced
-    // Fix: Remove it and simply move one of the other (rare) languages to the top of the list
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_wildcard_alone() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(parse_lang_items("*")))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    assert!(resolved_lang.is_none());
-  }
-
-  #[test]
-  fn test_negotiate_language_wildcard_with_langs_after() {
-    let req = TestRequest::default()
-      .insert_header(AcceptLanguage(parse_lang_items("*, fr")))
-      .to_http_request();
-
-    let resolved_lang = negotiate_lang(&req);
-
-    assert!(resolved_lang.is_some());
-  }
 }
