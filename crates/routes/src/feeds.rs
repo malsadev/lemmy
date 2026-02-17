@@ -869,17 +869,21 @@ mod tests {
   use super::*;
   use actix_web::test::TestRequest;
 
+  fn parse_lang_items(
+    accept_language_header_value: &str,
+  ) -> Vec<QualityItem<Preference<LanguageTag>>> {
+    accept_language_header_value
+      .split(',')
+      .map(|s| s.parse().unwrap())
+      .collect()
+  }
+
   #[test]
   fn test_negotiate_language_lang_supported_by_server() {
     let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "fj".parse().unwrap(),
-        "sm".parse().unwrap(),
-        "lo".parse().unwrap(),
-        "da".parse().unwrap(),
-        "en-GB;q=0.8".parse().unwrap(),
-        "en;q=0.7".parse().unwrap(),
-      ]))
+      .insert_header(AcceptLanguage(parse_lang_items(
+        "fj, sm, lo, da, en-GB;q=0.8, en;q=0.7",
+      )))
       .to_http_request();
 
     let resolved_lang = negotiate_lang(&req).unwrap();
@@ -892,12 +896,7 @@ mod tests {
   #[test]
   fn test_negotiate_language_lang_unsupported_by_server() {
     let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "fj".parse().unwrap(),
-        "sm".parse().unwrap(),
-        "lo".parse().unwrap(),
-        "km".parse().unwrap(),
-      ]))
+      .insert_header(AcceptLanguage(parse_lang_items("fj, sm, lo, km")))
       .to_http_request();
 
     let resolved_lang = negotiate_lang(&req);
@@ -910,7 +909,7 @@ mod tests {
   #[test]
   fn test_negotiate_language_wildcard_alone() {
     let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec!["*".parse().unwrap()]))
+      .insert_header(AcceptLanguage(parse_lang_items("*")))
       .to_http_request();
 
     let resolved_lang = negotiate_lang(&req);
@@ -921,10 +920,7 @@ mod tests {
   #[test]
   fn test_negotiate_language_wildcard_with_langs_after() {
     let req = TestRequest::default()
-      .insert_header(AcceptLanguage(vec![
-        "*".parse().unwrap(),
-        "fr".parse().unwrap(),
-      ]))
+      .insert_header(AcceptLanguage(parse_lang_items("*, fr")))
       .to_http_request();
 
     let resolved_lang = negotiate_lang(&req);
