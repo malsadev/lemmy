@@ -152,12 +152,13 @@ async fn get_feed_data(
   let title = format!(
     "{} - {}",
     site_view.site.name,
-    match Some(listing_type) {
-      Some(ListingType::All) => lang.all(),
-      Some(ListingType::Local) => lang.local(),
-      _ => unreachable!("Only All or Local are expected to match here"),
+    if listing_type == ListingType::Local {
+      lang.local()
+    } else {
+      lang.all()
     }
   );
+
   let link = context.settings().get_protocol_and_hostname();
   let items = create_post_items(posts, context.settings(), lang)?;
   Ok(send_feed_response(title, link, None, items, site_view))
