@@ -1,7 +1,6 @@
 use actix_cors::Cors;
 use lemmy_utils::settings::structs::Settings;
 
-pub mod negotiate_content;
 pub mod prometheus_metrics;
 pub mod scheduled_tasks;
 pub mod setup_local_site;

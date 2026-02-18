@@ -1,4 +1,4 @@
-use crate::utils::negotiate_content::get_lang_or_negotiate;
+mod negotiate_content;
 use actix_web::{Error, HttpRequest, HttpResponse, Result, error::ErrorBadRequest, web};
 use chrono::{DateTime, Utc};
 use lemmy_api_utils::{
@@ -28,6 +28,7 @@ use lemmy_utils::{
   settings::structs::Settings,
   utils::markdown::markdown_to_html,
 };
+use negotiate_content::get_lang_or_negotiate;
 use rss::{
   Category,
   Channel,
