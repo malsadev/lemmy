@@ -6,7 +6,7 @@ use lemmy_api_utils::{
 use lemmy_email::{translations::Lang, user_language};
 use rosetta_i18n::{Language, LanguageId};
 
-pub async fn get_lang_or_negotiate(
+pub(crate) async fn get_lang_or_negotiate(
   req: &HttpRequest,
   context: &web::Data<LemmyContext>,
 ) -> Result<Lang, Error> {
